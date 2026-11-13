@@ -17,6 +17,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: zykun-android-apk
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Buat APK Android

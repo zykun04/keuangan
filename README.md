@@ -23,6 +23,7 @@ Lalu buka `http://localhost:8000`.
 - Kategori usaha untuk penjualan, jasa, stok barang, operasional, gaji, sewa, pemasaran, dan biaya lainnya.
 - Pencatatan, pencarian, filter, edit, dan penghapusan transaksi.
 - Catatan utang/piutang dengan progres pelunasan dan pembayaran cicilan.
+- Setiap pinjaman tampil terpisah dengan tanggal pencairan, cicilan bulanan, tenor, sisa cicilan, dan riwayat pembayaran. Total sisa tagihan dihitung dari cicilan bulanan × tenor dikurangi pembayaran.
 - Kategori yang dapat disesuaikan.
 - Ringkasan bulanan dan pengeluaran per kategori.
 - Penyimpanan otomatis di `localStorage` browser.

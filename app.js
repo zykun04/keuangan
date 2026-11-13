@@ -28,7 +28,16 @@
   const formatDate = value => value ? new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T12:00:00`)) : '—';
   const monthKey = value => (value || today()).slice(0, 7);
   const monthName = value => new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(new Date(`${value}-15T12:00:00`));
-  const remaining = debt => Math.max(0, Number(debt.amount) - Number(debt.paid || 0));
+  const hasInstallmentPlan = debt => Number(debt.monthlyPayment) > 0 && Number(debt.installmentsTotal) > 0;
+  const remaining = debt => Math.max(0, (hasInstallmentPlan(debt) ? Number(debt.monthlyPayment) * Number(debt.installmentsTotal) : Number(debt.amount)) - Number(debt.paid || 0));
+  function nextDueDate(debt) {
+    if (!debt.dueDate) return '';
+    if (!hasInstallmentPlan(debt)) return debt.dueDate;
+    const first = new Date(`${debt.dueDate}T12:00:00`), months = Number(debt.installmentsPaid || 0);
+    const month = new Date(first.getFullYear(), first.getMonth() + months, 1), day = Number(debt.dueDay) || first.getDate();
+    const safeDay = Math.min(day, new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate());
+    return `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}-${String(safeDay).padStart(2, '0')}`;
+  }
   const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
   function save() {
     localStorage.setItem(KEY, JSON.stringify(state)); renderAll();
@@ -183,8 +192,8 @@
     const payable = currentDebts.filter(d => d.direction === 'payable').reduce((s, d) => s + remaining(d), 0);
     const receivable = currentDebts.filter(d => d.direction === 'receivable').reduce((s, d) => s + remaining(d), 0);
     $('#debtTotal').textContent = currency(payable + receivable); $('#payableTotal').textContent = currency(payable); $('#receivableTotal').textContent = currency(receivable);
-    const upcoming = currentDebts.filter(d => remaining(d) > 0).sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || '')).slice(0, 3);
-    $('#upcomingDebts').innerHTML = upcoming.length ? upcoming.map(d => `<div class="upcoming-item"><div class="upcoming-person"><span class="debt-avatar">${escapeHTML((d.person || '?').charAt(0).toUpperCase())}</span><span class="upcoming-copy"><strong>${escapeHTML(d.person)}</strong><span>${d.direction === 'payable' ? 'Utang' : 'Piutang'} · ${escapeHTML(formatDate(d.dueDate))}</span></span></div><span class="upcoming-amount">${currency(remaining(d))}<small>tersisa</small></span></div>`).join('') : '<div class="panel-subtitle">Belum ada jatuh tempo mendatang.</div>';
+    const upcoming = currentDebts.filter(d => remaining(d) > 0).sort((a, b) => nextDueDate(a).localeCompare(nextDueDate(b))).slice(0, 3);
+    $('#upcomingDebts').innerHTML = upcoming.length ? upcoming.map(d => `<div class="upcoming-item"><div class="upcoming-person"><span class="debt-avatar">${escapeHTML((d.person || '?').charAt(0).toUpperCase())}</span><span class="upcoming-copy"><strong>${escapeHTML(d.person)}</strong><span>${d.direction === 'payable' ? 'Utang' : 'Piutang'} · ${escapeHTML(formatDate(nextDueDate(d)))}</span></span></div><span class="upcoming-amount">${currency(remaining(d))}<small>tersisa</small></span></div>`).join('') : '<div class="panel-subtitle">Belum ada jatuh tempo mendatang.</div>';
     const sorted = [...currentTransactions].sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 5);
     $('#recentEmpty').classList.toggle('hidden', sorted.length > 0); $('#recentTransactions').innerHTML = sorted.map(transactionRow).join('');
     renderChart();
@@ -209,16 +218,18 @@
     const payable = currentDebts.filter(d => d.direction === 'payable'), receivable = currentDebts.filter(d => d.direction === 'receivable');
     $('#debtPagePayable').textContent = currency(payable.reduce((s, d) => s + remaining(d), 0)); $('#debtPageReceivable').textContent = currency(receivable.reduce((s, d) => s + remaining(d), 0));
     $('#debtPagePaid').textContent = currency(currentDebts.reduce((s, d) => s + Number(d.paid || 0), 0));
-    $('#debtPageDue').textContent = currency(payable.filter(d => remaining(d) > 0 && monthKey(d.dueDate) === monthKey(today())).reduce((s, d) => s + remaining(d), 0));
+    $('#debtPageDue').textContent = currency(payable.filter(d => remaining(d) > 0 && monthKey(nextDueDate(d)) === monthKey(today())).reduce((s, d) => s + Math.min(remaining(d), Number(d.monthlyPayment) || remaining(d)), 0));
     $('#allDebtCount').textContent = currentDebts.length; $('#payableDebtCount').textContent = payable.length; $('#receivableDebtCount').textContent = receivable.length;
-    const matches = currentDebts.filter(d => (debtFilter === 'all' || d.direction === debtFilter) && (status === 'all' || (status === 'paid' ? remaining(d) === 0 : remaining(d) > 0))).sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
+    const matches = currentDebts.filter(d => (debtFilter === 'all' || d.direction === debtFilter) && (status === 'all' || (status === 'paid' ? remaining(d) === 0 : remaining(d) > 0))).sort((a, b) => nextDueDate(a).localeCompare(nextDueDate(b)));
     const renderBill = d => {
-      const left = remaining(d), pct = d.amount ? Math.min(100, (Number(d.paid || 0) / Number(d.amount)) * 100) : 0;
-      const overdue = left > 0 && d.dueDate && d.dueDate < today();
-      const stateLabel = left === 0 ? 'Lunas' : overdue ? 'Terlambat' : d.dueDate && monthKey(d.dueDate) === monthKey(today()) ? 'Jatuh tempo bulan ini' : 'Belum jatuh tempo';
+      const left = remaining(d), totalInstallments = hasInstallmentPlan(d) ? Number(d.installmentsTotal) : 1;
+      const paidInstallments = hasInstallmentPlan(d) ? Math.min(totalInstallments, Number(d.installmentsPaid || 0)) : (left === 0 ? 1 : 0);
+      const unpaidInstallments = Math.max(0, totalInstallments - paidInstallments), monthlyPayment = hasInstallmentPlan(d) ? Number(d.monthlyPayment) : Number(d.amount);
+      const due = nextDueDate(d), disbursed = d.disbursementDate || (d.createdAt || d.dueDate || today()).slice(0, 10), overdue = left > 0 && due && due < today();
+      const paidPercent = totalInstallments ? Math.round(paidInstallments / totalInstallments * 100) : 0;
       const history = [...(d.payments || [])].sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 5);
       const historyMarkup = history.length ? `<details class="bill-history"><summary>Riwayat cicilan (${d.payments.length})</summary><div>${history.map(p => `<span><time>${escapeHTML(formatDate(p.date))}</time><strong>${currency(p.amount)}</strong></span>`).join('')}</div></details>` : '';
-      return `<article class="bill-card"><div class="bill-card-top"><div class="bill-identity"><span class="bill-logo">${escapeHTML((d.person || '?').charAt(0).toUpperCase())}</span><span><small>${d.direction === 'payable' ? 'TAGIHAN SAYA' : 'PIUTANG SAYA'}</small><strong>${escapeHTML(d.person)}</strong>${d.note ? `<em>${escapeHTML(d.note)}</em>` : ''}</span></div><span class="bill-status ${overdue ? 'overdue' : left === 0 ? 'settled' : ''}">${stateLabel}</span></div><div class="bill-amount-row"><div><small>${d.direction === 'payable' ? 'SISA TAGIHAN' : 'SISA PIUTANG'}</small><strong>${currency(left)}</strong></div><div class="bill-due ${overdue ? 'due-soon' : ''}"><small>JATUH TEMPO</small><strong>${escapeHTML(formatDate(d.dueDate))}</strong></div></div><div class="bill-progress-label"><span>Terbayar ${currency(d.paid || 0)} dari ${currency(d.amount)}</span><strong>${Math.round(pct)}%</strong></div><div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div><div class="bill-card-bottom"><span>Total awal <strong>${currency(d.amount)}</strong></span><div class="debt-actions">${left > 0 ? `<button class="small-action pay" data-payment="${escapeHTML(d.id)}">＋ Catat cicilan</button>` : '<span class="paid-badge">✓ Lunas</span>'}<button class="small-action" data-edit-debt="${escapeHTML(d.id)}" aria-label="Edit">✎</button><button class="row-action delete" data-delete-debt="${escapeHTML(d.id)}" aria-label="Hapus">×</button></div></div>${historyMarkup}</article>`;
+      return `<article class="bill-card loan-card"><div class="loan-disbursement"><span>Tanggal Pencairan: ${escapeHTML(formatDate(disbursed))}</span><strong>${escapeHTML(d.person)}</strong></div><details class="loan-accordion"><summary><div class="loan-row"><div class="loan-copy"><strong>${currency(d.amount)}</strong><span>${currency(monthlyPayment)} jatuh tempo tanggal ${Number(d.dueDay) || (due ? Number(due.slice(-2)) : '—')} setiap bulan</span></div><span class="loan-counter"><strong>${unpaidInstallments}/${totalInstallments}</strong><small>Belum Dibayar</small></span><b class="loan-chevron">›</b></div></summary><div class="loan-details-content"><div class="loan-detail-total"><span>Perkiraan sisa cicilan</span><strong>${currency(left)}</strong></div><div class="bill-progress-label"><span>${paidInstallments} dari ${totalInstallments} cicilan dibayar</span><strong>${paidPercent}%</strong></div><div class="progress-track"><div class="progress-fill" style="width:${paidPercent}%"></div></div><div class="loan-detail-meta"><span>Jatuh tempo berikutnya <strong class="${overdue ? 'due-soon' : ''}">${escapeHTML(formatDate(due))}${overdue ? ' · terlambat' : ''}</strong></span>${d.note ? `<span>Catatan <strong>${escapeHTML(d.note)}</strong></span>` : ''}</div><div class="bill-card-bottom"><span>Sudah dibayar <strong>${currency(d.paid || 0)}</strong></span><div class="debt-actions">${left > 0 ? `<button class="small-action pay" data-payment="${escapeHTML(d.id)}">＋ Catat cicilan</button>` : '<span class="paid-badge">✓ Lunas</span>'}<button class="small-action" data-edit-debt="${escapeHTML(d.id)}" aria-label="Edit">✎</button><button class="row-action delete" data-delete-debt="${escapeHTML(d.id)}" aria-label="Hapus">×</button></div></div>${historyMarkup}</div></details></article>`;
     };
     const visiblePayable = matches.filter(d => d.direction === 'payable'), visibleReceivable = matches.filter(d => d.direction === 'receivable');
     const section = (title, rows) => rows.length ? `<section class="bill-section"><div class="bill-section-heading"><h2>${title}</h2><strong>${currency(rows.reduce((sum, d) => sum + remaining(d), 0))}</strong></div><div class="bill-section-list">${rows.map(renderBill).join('')}</div></section>` : '';
@@ -265,12 +276,16 @@
     }
     openDialog('transactionDialog');
   }
-  function resetDebtForm() { const f = $('#debtForm'); f.reset(); f.elements.id.value = ''; f.elements.dueDate.value = today(); $('#debtModalTitle').textContent = 'Tambah tagihan / piutang'; }
+  function resetDebtForm() { const f = $('#debtForm'); f.reset(); f.elements.id.value = ''; f.elements.paid.value = '0'; f.elements.installmentsPaid.value = '0'; f.elements.disbursementDate.value = today(); f.elements.dueDate.value = today(); $('#debtModalTitle').textContent = 'Tambah pinjaman / piutang'; }
   function openDebt(debt) {
     resetDebtForm();
     if (debt) {
-      const f = $('#debtForm'); f.elements.id.value = debt.id; f.elements.person.value = debt.person; f.elements.amount.value = debt.amount; f.elements.paid.value = debt.paid || 0; f.elements.dueDate.value = debt.dueDate || today(); f.elements.note.value = debt.note || '';
-      $(`input[name="direction"][value="${debt.direction}"]`, f).checked = true; $('#debtModalTitle').textContent = 'Edit tagihan / piutang';
+      const f = $('#debtForm'), monthlyPayment = Number(debt.monthlyPayment) || Number(debt.amount), installmentsTotal = Number(debt.installmentsTotal) || 1;
+      const paidInstallments = Number.isFinite(Number(debt.installmentsPaid)) ? Number(debt.installmentsPaid) : (monthlyPayment ? Math.floor(Number(debt.paid || 0) / monthlyPayment) : 0);
+      f.elements.id.value = debt.id; f.elements.person.value = debt.person; f.elements.amount.value = debt.amount; f.elements.paid.value = debt.paid || 0;
+      f.elements.disbursementDate.value = debt.disbursementDate || (debt.createdAt || today()).slice(0, 10); f.elements.monthlyPayment.value = monthlyPayment; f.elements.installmentsTotal.value = installmentsTotal;
+      f.elements.installmentsPaid.value = Math.min(installmentsTotal, paidInstallments); f.elements.dueDate.value = debt.dueDate || today(); f.elements.note.value = debt.note || '';
+      $(`input[name="direction"][value="${debt.direction}"]`, f).checked = true; $('#debtModalTitle').textContent = 'Edit pinjaman / piutang';
     }
     openDialog('debtDialog');
   }
@@ -286,7 +301,7 @@
     const editD = event.target.closest('[data-edit-debt]'); if (editD) openDebt(state.debts.find(d => d.id === editD.dataset.editDebt));
     const deleteD = event.target.closest('[data-delete-debt]'); if (deleteD && confirm('Hapus catatan utang ini? Riwayat cicilannya juga akan dihapus.')) { state.debts = state.debts.filter(d => d.id !== deleteD.dataset.deleteDebt); save(); toast('Catatan dihapus.'); }
     const pay = event.target.closest('[data-payment]'); if (pay) {
-      const d = state.debts.find(item => item.id === pay.dataset.payment), f = $('#paymentForm'); f.reset(); f.elements.id.value = d.id; f.elements.date.value = today(); f.elements.amount.max = remaining(d); $('#paymentDebtName').textContent = `${d.person} · tersisa ${currency(remaining(d))}`; openDialog('paymentDialog');
+      const d = state.debts.find(item => item.id === pay.dataset.payment), f = $('#paymentForm'); f.reset(); f.elements.id.value = d.id; f.elements.date.value = today(); f.elements.amount.max = remaining(d); f.elements.amount.value = Math.min(Number(d.monthlyPayment) || remaining(d), remaining(d)); $('#paymentDebtName').textContent = `${d.person} · sisa tagihan ${currency(remaining(d))}`; openDialog('paymentDialog');
     }
     const debtTab = event.target.closest('[data-debt-filter]'); if (debtTab) { debtFilter = debtTab.dataset.debtFilter; $$('.filter-tab').forEach(t => t.classList.toggle('active', t === debtTab)); renderDebts(); }
     if (event.target.closest('#categoryBtn')) { renderCategories(); openDialog('categoryDialog'); }
@@ -308,15 +323,20 @@
   $('#debtForm').addEventListener('submit', event => {
     event.preventDefault(); const f = event.currentTarget, data = Object.fromEntries(new FormData(f));
     const timestamp = new Date().toISOString(), existing = data.id ? state.debts.find(d => d.id === data.id) : null;
-    const item = { id: data.id || crypto.randomUUID(), person: data.person.trim(), direction: data.direction, amount: Number(data.amount), paid: Math.min(Number(data.paid) || 0, Number(data.amount)), dueDate: data.dueDate, note: data.note.trim(), scope: state.scope, createdAt: existing?.createdAt || timestamp, updatedAt: timestamp };
-    if (!item.person || item.amount <= 0) return;
+    const amount = Number(data.amount), monthlyPayment = Number(data.monthlyPayment), installmentsTotal = Number(data.installmentsTotal), installmentsPaid = Math.min(installmentsTotal, Math.max(0, Number(data.installmentsPaid) || 0));
+    const previousCount = existing ? (Number.isFinite(Number(existing.installmentsPaid)) ? Number(existing.installmentsPaid) : Math.floor(Number(existing.paid || 0) / (Number(existing.monthlyPayment) || Number(existing.amount) || 1))) : 0;
+    const paid = existing ? Math.max(0, Number(existing.paid || 0) + (installmentsPaid - previousCount) * monthlyPayment) : installmentsPaid * monthlyPayment;
+    const item = { id: data.id || crypto.randomUUID(), person: data.person.trim(), direction: data.direction, amount, paid: Math.min(paid, monthlyPayment * installmentsTotal), monthlyPayment, installmentsTotal, installmentsPaid, disbursementDate: data.disbursementDate, dueDay: Number(data.dueDate.slice(-2)), dueDate: data.dueDate, note: data.note.trim(), scope: state.scope, createdAt: existing?.createdAt || timestamp, updatedAt: timestamp };
+    if (!item.person || item.amount <= 0 || monthlyPayment <= 0 || installmentsTotal < 1 || !item.dueDate) return;
     if (data.id) state.debts = state.debts.map(d => d.id === data.id ? { ...d, ...item } : d); else state.debts.push(item);
     closeDialog('debtDialog'); save(); toast(data.id ? 'Catatan diperbarui.' : 'Catatan tagihan tersimpan.');
   });
   $('#paymentForm').addEventListener('submit', event => {
     event.preventDefault(); const f = event.currentTarget, id = f.elements.id.value, d = state.debts.find(item => item.id === id), amount = Number(f.elements.amount.value);
     if (!d || amount <= 0 || amount > remaining(d)) return toast('Jumlah cicilan melebihi sisa tagihan.');
-    d.paid = Number(d.paid || 0) + amount; d.updatedAt = new Date().toISOString(); d.payments ||= []; d.payments.push({ amount, date: f.elements.date.value });
+    d.paid = Number(d.paid || 0) + amount;
+    if (hasInstallmentPlan(d)) d.installmentsPaid = Math.min(Number(d.installmentsTotal), Math.floor((d.paid + 0.001) / Number(d.monthlyPayment)));
+    d.updatedAt = new Date().toISOString(); d.payments ||= []; d.payments.push({ amount, date: f.elements.date.value });
     closeDialog('paymentDialog'); save(); toast('Cicilan berhasil dicatat.');
   });
   $('#transactionSearch').addEventListener('input', renderTransactions); $('#typeFilter').addEventListener('change', renderTransactions); $('#monthFilter').addEventListener('change', renderTransactions);
