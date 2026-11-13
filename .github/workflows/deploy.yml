@@ -1,4 +1,4 @@
-name: Deploy Rapi to GitHub Pages
+name: Deploy Zykun to GitHub Pages
 
 on:
   push:
