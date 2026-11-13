@@ -148,7 +148,7 @@
     const known = ['dashboard', 'transaksi', 'utang', 'ringkasan'].includes(page) ? page : 'dashboard';
     $$('.page').forEach(el => el.classList.toggle('active', el.id === `${known}Page`));
     $$('.nav-link[data-page]').forEach(el => el.classList.toggle('active', el.dataset.page === known));
-    $('#pageCrumb').textContent = ({ dashboard: 'Dashboard', transaksi: 'Transaksi', utang: 'Utang & Piutang', ringkasan: 'Ringkasan' })[known];
+    $('#pageCrumb').textContent = ({ dashboard: 'Dashboard', transaksi: 'Transaksi', utang: 'Tagihan & Piutang', ringkasan: 'Ringkasan' })[known];
     $('#sidebar').classList.remove('open');
     if (known === 'ringkasan') renderSummary();
   }
@@ -208,15 +208,24 @@
     const currentDebts = scopedDebts();
     const payable = currentDebts.filter(d => d.direction === 'payable'), receivable = currentDebts.filter(d => d.direction === 'receivable');
     $('#debtPagePayable').textContent = currency(payable.reduce((s, d) => s + remaining(d), 0)); $('#debtPageReceivable').textContent = currency(receivable.reduce((s, d) => s + remaining(d), 0));
-    $('#debtPagePaid').textContent = currency(currentDebts.reduce((s, d) => s + Number(d.paid || 0), 0)); $('#allDebtCount').textContent = currentDebts.length;
-    const rows = [...currentDebts].filter(d => (debtFilter === 'all' || d.direction === debtFilter) && (status === 'all' || (status === 'paid' ? remaining(d) === 0 : remaining(d) > 0))).sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
-    $('#debtList').innerHTML = rows.map(d => {
+    $('#debtPagePaid').textContent = currency(currentDebts.reduce((s, d) => s + Number(d.paid || 0), 0));
+    $('#debtPageDue').textContent = currency(payable.filter(d => remaining(d) > 0 && monthKey(d.dueDate) === monthKey(today())).reduce((s, d) => s + remaining(d), 0));
+    $('#allDebtCount').textContent = currentDebts.length; $('#payableDebtCount').textContent = payable.length; $('#receivableDebtCount').textContent = receivable.length;
+    const matches = currentDebts.filter(d => (debtFilter === 'all' || d.direction === debtFilter) && (status === 'all' || (status === 'paid' ? remaining(d) === 0 : remaining(d) > 0))).sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
+    const renderBill = d => {
       const left = remaining(d), pct = d.amount ? Math.min(100, (Number(d.paid || 0) / Number(d.amount)) * 100) : 0;
       const overdue = left > 0 && d.dueDate && d.dueDate < today();
-      return `<article class="debt-card"><div class="debt-person"><span class="debt-avatar">${escapeHTML((d.person || '?').charAt(0).toUpperCase())}</span><span class="debt-person-copy"><strong>${escapeHTML(d.person)}</strong><span>${d.direction === 'payable' ? 'Saya berutang' : 'Orang lain berutang'}${d.note ? ` · ${escapeHTML(d.note)}` : ''}</span></span></div><div class="debt-progress"><div class="debt-progress-label"><span>Terbayar ${currency(d.paid || 0)}</span><strong>${Math.round(pct)}%</strong></div><div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div></div><div class="debt-due"><span>Jatuh tempo</span><strong class="${overdue ? 'due-soon' : ''}">${escapeHTML(formatDate(d.dueDate))}${overdue ? ' · terlambat' : ''}</strong></div><div class="debt-actions">${left > 0 ? `<button class="small-action pay" data-payment="${escapeHTML(d.id)}">＋ Cicilan</button>` : '<span class="paid-badge">✓ Lunas</span>'}<button class="small-action" data-edit-debt="${escapeHTML(d.id)}" aria-label="Edit">✎</button><button class="row-action delete" data-delete-debt="${escapeHTML(d.id)}" aria-label="Hapus">×</button></div></article>`;
-    }).join('');
-    $('#debtsEmpty').classList.toggle('hidden', currentDebts.length > 0); $('#debtList').classList.toggle('hidden', rows.length === 0 && currentDebts.length > 0);
-    if (!rows.length && currentDebts.length > 0) $('#debtList').innerHTML = '<div class="panel empty-state"><strong>Tidak ada catatan pada filter ini</strong><p>Coba pilih jenis atau status yang lain.</p></div>', $('#debtList').classList.remove('hidden');
+      const stateLabel = left === 0 ? 'Lunas' : overdue ? 'Terlambat' : d.dueDate && monthKey(d.dueDate) === monthKey(today()) ? 'Jatuh tempo bulan ini' : 'Belum jatuh tempo';
+      const history = [...(d.payments || [])].sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 5);
+      const historyMarkup = history.length ? `<details class="bill-history"><summary>Riwayat cicilan (${d.payments.length})</summary><div>${history.map(p => `<span><time>${escapeHTML(formatDate(p.date))}</time><strong>${currency(p.amount)}</strong></span>`).join('')}</div></details>` : '';
+      return `<article class="bill-card"><div class="bill-card-top"><div class="bill-identity"><span class="bill-logo">${escapeHTML((d.person || '?').charAt(0).toUpperCase())}</span><span><small>${d.direction === 'payable' ? 'TAGIHAN SAYA' : 'PIUTANG SAYA'}</small><strong>${escapeHTML(d.person)}</strong>${d.note ? `<em>${escapeHTML(d.note)}</em>` : ''}</span></div><span class="bill-status ${overdue ? 'overdue' : left === 0 ? 'settled' : ''}">${stateLabel}</span></div><div class="bill-amount-row"><div><small>${d.direction === 'payable' ? 'SISA TAGIHAN' : 'SISA PIUTANG'}</small><strong>${currency(left)}</strong></div><div class="bill-due ${overdue ? 'due-soon' : ''}"><small>JATUH TEMPO</small><strong>${escapeHTML(formatDate(d.dueDate))}</strong></div></div><div class="bill-progress-label"><span>Terbayar ${currency(d.paid || 0)} dari ${currency(d.amount)}</span><strong>${Math.round(pct)}%</strong></div><div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div><div class="bill-card-bottom"><span>Total awal <strong>${currency(d.amount)}</strong></span><div class="debt-actions">${left > 0 ? `<button class="small-action pay" data-payment="${escapeHTML(d.id)}">＋ Catat cicilan</button>` : '<span class="paid-badge">✓ Lunas</span>'}<button class="small-action" data-edit-debt="${escapeHTML(d.id)}" aria-label="Edit">✎</button><button class="row-action delete" data-delete-debt="${escapeHTML(d.id)}" aria-label="Hapus">×</button></div></div>${historyMarkup}</article>`;
+    };
+    const visiblePayable = matches.filter(d => d.direction === 'payable'), visibleReceivable = matches.filter(d => d.direction === 'receivable');
+    const section = (title, rows) => rows.length ? `<section class="bill-section"><div class="bill-section-heading"><h2>${title}</h2><strong>${currency(rows.reduce((sum, d) => sum + remaining(d), 0))}</strong></div><div class="bill-section-list">${rows.map(renderBill).join('')}</div></section>` : '';
+    const markup = debtFilter === 'all' ? section('Tagihan yang harus dibayar', visiblePayable) + section('Piutang yang perlu ditagih', visibleReceivable) : matches.map(renderBill).join('');
+    $('#debtList').innerHTML = markup;
+    $('#debtsEmpty').classList.toggle('hidden', currentDebts.length > 0); $('#debtList').classList.toggle('hidden', matches.length === 0 && currentDebts.length > 0);
+    if (!matches.length && currentDebts.length > 0) $('#debtList').innerHTML = '<div class="panel empty-state"><strong>Tidak ada tagihan pada filter ini</strong><p>Coba pilih status yang lain.</p></div>', $('#debtList').classList.remove('hidden');
   }
   function renderSummary() {
     const month = $('#summaryMonth').value || monthKey(today()), rows = monthlyTransactions(month);
@@ -256,12 +265,12 @@
     }
     openDialog('transactionDialog');
   }
-  function resetDebtForm() { const f = $('#debtForm'); f.reset(); f.elements.id.value = ''; f.elements.dueDate.value = today(); $('#debtModalTitle').textContent = 'Tambah utang / piutang'; }
+  function resetDebtForm() { const f = $('#debtForm'); f.reset(); f.elements.id.value = ''; f.elements.dueDate.value = today(); $('#debtModalTitle').textContent = 'Tambah tagihan / piutang'; }
   function openDebt(debt) {
     resetDebtForm();
     if (debt) {
       const f = $('#debtForm'); f.elements.id.value = debt.id; f.elements.person.value = debt.person; f.elements.amount.value = debt.amount; f.elements.paid.value = debt.paid || 0; f.elements.dueDate.value = debt.dueDate || today(); f.elements.note.value = debt.note || '';
-      $(`input[name="direction"][value="${debt.direction}"]`, f).checked = true; $('#debtModalTitle').textContent = 'Edit utang / piutang';
+      $(`input[name="direction"][value="${debt.direction}"]`, f).checked = true; $('#debtModalTitle').textContent = 'Edit tagihan / piutang';
     }
     openDialog('debtDialog');
   }
@@ -302,7 +311,7 @@
     const item = { id: data.id || crypto.randomUUID(), person: data.person.trim(), direction: data.direction, amount: Number(data.amount), paid: Math.min(Number(data.paid) || 0, Number(data.amount)), dueDate: data.dueDate, note: data.note.trim(), scope: state.scope, createdAt: existing?.createdAt || timestamp, updatedAt: timestamp };
     if (!item.person || item.amount <= 0) return;
     if (data.id) state.debts = state.debts.map(d => d.id === data.id ? { ...d, ...item } : d); else state.debts.push(item);
-    closeDialog('debtDialog'); save(); toast(data.id ? 'Catatan diperbarui.' : 'Catatan utang tersimpan.');
+    closeDialog('debtDialog'); save(); toast(data.id ? 'Catatan diperbarui.' : 'Catatan tagihan tersimpan.');
   });
   $('#paymentForm').addEventListener('submit', event => {
     event.preventDefault(); const f = event.currentTarget, id = f.elements.id.value, d = state.debts.find(item => item.id === id), amount = Number(f.elements.amount.value);
