@@ -45,6 +45,17 @@ Konfigurasi web Firebase memang berada di sisi browser; akses data dibatasi oleh
 
 Data lokal lama tidak dikirim otomatis. Proses unggah atau penggabungan membutuhkan klik pengguna. Data yang belum dipindahkan tetap berada di browser perangkat asal; ekspor JSON tetap tersedia sebagai cadangan.
 
+## Mengunduh APK Android
+
+Workflow **Build Android APK Zykun** membuat APK debug setiap kali aplikasi diperbarui di branch `main`. Setelah workflow selesai:
+
+1. Buka tab **Actions** di repositori GitHub.
+2. Pilih proses **Build Android APK Zykun** yang paling baru dan pastikan statusnya berhasil.
+3. Pada bagian **Artifacts**, unduh `Zykun-Android-APK` lalu ekstrak berkas ZIP.
+4. Buka `app-debug.apk` di HP Android dan izinkan pemasangan aplikasi jika diminta.
+
+APK memuat versi aplikasi saat proses build dan memakai akun Firebase yang sama. Perangkat memerlukan internet untuk masuk serta menyinkronkan catatan. APK debug ini untuk dipasang langsung, bukan untuk diterbitkan ke Play Store.
+
 ## Menerbitkan ke web dengan GitHub Pages
 
 Workflow GitHub Actions sudah disertakan pada `.github/workflows/deploy.yml`.

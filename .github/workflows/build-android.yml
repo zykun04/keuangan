@@ -1,0 +1,58 @@
+name: Build Android APK Zykun
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'app.js'
+      - '*.css'
+      - 'firebase-config.js'
+      - 'firebase-sync.js'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - '.github/workflows/build-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Buat APK Android
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ambil source aplikasi
+        uses: actions/checkout@v6
+
+      - name: Siapkan Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Siapkan Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Pasang paket Capacitor
+        run: npm install
+
+      - name: Siapkan berkas aplikasi Android
+        run: |
+          mkdir -p www
+          cp index.html app.js styles.css business.css cloud.css firebase-config.js firebase-sync.js www/
+          npx cap add android
+          npx cap sync android
+
+      - name: Bangun APK
+        run: cd android && ./gradlew assembleDebug
+
+      - name: Simpan APK agar bisa diunduh
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zykun-Android-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
